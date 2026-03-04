@@ -73,6 +73,10 @@
       background: rgba(255,122,115,.14);
       border-color: rgba(255,122,115,.28);
     }
+    button:disabled, input:disabled, select:disabled{
+      opacity:.55;
+      cursor:not-allowed;
+    }
 
     .field{flex:1;min-width:150px}
     .field.small{flex:0 0 140px;min-width:140px}
@@ -158,10 +162,10 @@
       .stickyBar button{flex:1}
     }
 
-    /* Modal */
+    /* Modal + overlays */
     .modalBackdrop{
       position:fixed; inset:0;
-      background: rgba(0,0,0,.6);
+      background: rgba(0,0,0,.65);
       display:none;
       align-items:center;
       justify-content:center;
@@ -194,9 +198,9 @@
   <div class="card">
     <div class="row" style="justify-content:space-between;align-items:center;gap:12px;">
       <div>
-        <div class="pill" id="lockPill"><span class="mono">🔒</span> <b>Settings Locked</b></div>
+        <div class="pill" id="lockPill"><span class="mono">🔒</span> <b>Locked</b></div>
         <div class="muted" id="lockHint" style="margin-top:6px;">
-          Units/specs are locked. Unlock to change them.
+          Locked. Unlock to use the calculator.
         </div>
       </div>
       <div class="row actions">
@@ -293,11 +297,11 @@
   </div>
 </div>
 
-<!-- PASSWORD MODAL -->
+<!-- PASSWORD MODAL (for unlocking) -->
 <div class="modalBackdrop" id="modalBackdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
   <div class="modal">
-    <h3 id="modalTitle">Unlock settings</h3>
-    <div class="muted">Enter your password to edit Units/specs/target/shim step on this device.</div>
+    <h3 id="modalTitle">Unlock calculator</h3>
+    <div class="muted">Enter your password to use the site on this device.</div>
 
     <label for="pwInput">Password</label>
     <input id="pwInput" type="password" inputmode="numeric" autocomplete="current-password" placeholder="Enter password" />
@@ -311,14 +315,25 @@
   </div>
 </div>
 
+<!-- FULL APP LOCK OVERLAY (blocks everything when locked) -->
+<div class="modalBackdrop" id="appLockBackdrop" aria-hidden="true">
+  <div class="modal">
+    <h3>Locked</h3>
+    <div class="muted">Enter password to use the calculator.</div>
+    <div class="row" style="margin-top:12px;justify-content:flex-end">
+      <button type="button" id="appLockUnlock">Unlock</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (() => {
   // =========================
-  // PASSWORD (YOUR REQUEST)
+  // PASSWORD (as requested)
   // =========================
   const PASSWORD = "121099";
 
-  const STORAGE_KEY = "shimCalc_settingsUnlocked_v1";
+  const STORAGE_KEY = "shimCalc_appUnlocked_v1";
   const MM_PER_IN = 25.4;
 
   const $ = (id) => document.getElementById(id);
@@ -366,35 +381,45 @@
     return {label:"In spec", cls:"good"};
   }
 
-  // ---------- settings lock ----------
+  // ---------- FULL APP LOCK ----------
   function isUnlocked(){
     return localStorage.getItem(STORAGE_KEY) === "1";
   }
 
-  function setSettingsEnabled(enabled){
-    const ids = ["unit","shimStep","targetMode","inMin","inMax","exMin","exMax"];
-    ids.forEach(id => {
-      const el = $(id);
-      if (el) el.disabled = !enabled;
+  function setAppEnabled(enabled){
+    // Disable EVERYTHING on the page (inputs/selects/buttons),
+    // except the unlock/lock controls and modal controls.
+    document.querySelectorAll("input, select, button").forEach(el => {
+      const allowIds = new Set([
+        "unlockBtn","lockBtn",
+        "pwOk","pwCancel","pwInput",
+        "appLockUnlock"
+      ]);
+      if (allowIds.has(el.id)) return;
+      el.disabled = !enabled;
     });
 
+    // Show/hide the overlay that blocks the whole app
+    $("appLockBackdrop").style.display = enabled ? "none" : "flex";
+
+    // Update UI text
     const pill = $("lockPill");
     const hint = $("lockHint");
     if (enabled){
-      pill.innerHTML = `<span class="mono">🔓</span> <b>Settings Unlocked</b>`;
-      hint.textContent = "Unlocked on this device. Tap Lock when you're done.";
+      pill.innerHTML = `<span class="mono">🔓</span> <b>Unlocked</b>`;
+      hint.textContent = "Unlocked. Tap Lock when you're done.";
     } else {
-      pill.innerHTML = `<span class="mono">🔒</span> <b>Settings Locked</b>`;
-      hint.textContent = "Units/specs are locked. Unlock to change them.";
+      pill.innerHTML = `<span class="mono">🔒</span> <b>Locked</b>`;
+      hint.textContent = "Locked. Unlock to use the calculator.";
     }
   }
 
-  function lockSettings(){
+  function lockApp(){
     localStorage.removeItem(STORAGE_KEY);
-    setSettingsEnabled(false);
+    setAppEnabled(false);
   }
 
-  // modal controls
+  // ---------- modal controls ----------
   function openModal(){
     $("pwErr").style.display = "none";
     $("pwInput").value = "";
@@ -404,21 +429,28 @@
   function closeModal(){
     $("modalBackdrop").style.display = "none";
   }
+
+  function unlockApp(){
+    localStorage.setItem(STORAGE_KEY, "1");
+    setAppEnabled(true);
+    closeModal();
+    recalcAll();
+  }
+
   function tryUnlock(){
     const entered = $("pwInput").value;
     if (entered === PASSWORD){
-      localStorage.setItem(STORAGE_KEY, "1");
-      setSettingsEnabled(true);
-      closeModal();
-      recalcAll();
+      unlockApp();
     } else {
       $("pwErr").style.display = "block";
       $("pwInput").select();
     }
   }
 
+  // Buttons
   $("unlockBtn").addEventListener("click", openModal);
-  $("lockBtn").addEventListener("click", () => { lockSettings(); recalcAll(); });
+  $("appLockUnlock").addEventListener("click", openModal);
+  $("lockBtn").addEventListener("click", () => { lockApp(); });
 
   $("pwCancel").addEventListener("click", closeModal);
   $("pwOk").addEventListener("click", tryUnlock);
@@ -458,7 +490,6 @@
 
     if (!specs || !isFinite(targetMM)){
       return {
-        ok:false,
         target:"Fix specs",
         needed:"—",
         newShim:"—",
@@ -474,7 +505,6 @@
 
     if (!isFinite(measuredDisplay)){
       return {
-        ok:false,
         target: targetDisp,
         needed:"—",
         newShim:"—",
@@ -492,7 +522,6 @@
 
     if (!isFinite(oldShim) || oldShim <= 0){
       return {
-        ok:false,
         target: targetDisp,
         needed:"—",
         newShim:"—",
@@ -508,7 +537,7 @@
     // new shim: old + (measured - target)
     const rawNewShim = oldShim + (measuredMM - targetMM);
     const newShim = roundShimMM(rawNewShim);
-    const shimNumber = Math.round(newShim * 100); // 2.35 -> 235
+    const shimNumber = Math.round(newShim * 100);
     const newShimDisp = `${newShim.toFixed(2)} mm (≈ ${shimNumber})`;
 
     // predicted final clearance: measured + (old - new)
@@ -516,7 +545,6 @@
     const finalDisp = `${fmt(fromMM(finalMM,unit),unit)} ${unit}`;
 
     return {
-      ok:true,
       target: targetDisp,
       needed: neededDisp,
       newShim: newShimDisp,
@@ -526,20 +554,16 @@
   }
 
   function recalcAll(){
-    // nothing to do here other than re-render output labels based on new specs/units
-    // but we separate render() and calcRow() so we can just update output nodes:
     rows.forEach(r => updateOutputs(r.id));
   }
 
   // ---------- render ----------
   function render(){
-    // table
     tbodyTable.innerHTML = "";
-    // cards
     cards.innerHTML = "";
 
     rows.forEach((row, index) => {
-      // DESKTOP TABLE ROW
+      // Desktop row
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td class="mono">${index + 1}</td>
@@ -562,7 +586,7 @@
       `;
       tbodyTable.appendChild(tr);
 
-      // PHONE CARD
+      // Phone card
       const card = document.createElement("div");
       card.className = "valveCard";
       card.innerHTML = `
@@ -615,7 +639,11 @@
       el.addEventListener("change", () => {
         const id = Number(el.dataset.id);
         const r = rows.find(x => x.id === id);
-        if (r){ r.type = el.value; syncTypeSelects(id, el.value); updateOutputs(id); }
+        if (r){
+          r.type = el.value;
+          syncTypeSelects(id, el.value);
+          updateOutputs(id);
+        }
       });
     });
 
@@ -623,7 +651,11 @@
       el.addEventListener("input", () => {
         const id = Number(el.dataset.id);
         const r = rows.find(x => x.id === id);
-        if (r){ r.measured = el.value; syncInputs(id, "measured", el.value); updateOutputs(id); }
+        if (r){
+          r.measured = el.value;
+          syncInputs(id, "measured", el.value);
+          updateOutputs(id);
+        }
       });
     });
 
@@ -631,7 +663,11 @@
       el.addEventListener("input", () => {
         const id = Number(el.dataset.id);
         const r = rows.find(x => x.id === id);
-        if (r){ r.oldShim = el.value; syncInputs(id, "oldShim", el.value); updateOutputs(id); }
+        if (r){
+          r.oldShim = el.value;
+          syncInputs(id, "oldShim", el.value);
+          updateOutputs(id);
+        }
       });
     });
 
@@ -639,15 +675,22 @@
       btn.addEventListener("click", () => removeRow(Number(btn.dataset.remove)));
     });
 
+    // Apply lock state after re-render (so new controls are disabled if locked)
+    setAppEnabled(isUnlocked());
+
     // initial output fill
     rows.forEach(r => updateOutputs(r.id));
   }
 
   function syncTypeSelects(id, value){
-    document.querySelectorAll(`select.type[data-id="${id}"]`).forEach(s => { if (s.value !== value) s.value = value; });
+    document.querySelectorAll(`select.type[data-id="${id}"]`).forEach(s => {
+      if (s.value !== value) s.value = value;
+    });
   }
   function syncInputs(id, cls, value){
-    document.querySelectorAll(`input.${cls}[data-id="${id}"]`).forEach(i => { if (i.value !== value) i.value = value; });
+    document.querySelectorAll(`input.${cls}[data-id="${id}"]`).forEach(i => {
+      if (i.value !== value) i.value = value;
+    });
   }
 
   function setText(id, text){
@@ -665,10 +708,8 @@
     setText(`target-${id}`, res.target);
     setText(`needed-${id}`, res.needed);
     setText(`final-${id}`, res.final);
-
     const ns = $(`newShim-${id}`);
     if (ns) ns.textContent = res.newShim;
-
     const st = $(`status-${id}`);
     if (st) st.innerHTML = res.statusHTML;
 
@@ -677,7 +718,6 @@
     setText(`neededCard-${id}`, res.needed);
     setText(`newShimCard-${id}`, res.newShim);
     setText(`finalCard-${id}`, res.final);
-
     const stc = $(`statusCard-${id}`);
     if (stc) stc.innerHTML = res.statusHTML;
   }
@@ -696,13 +736,16 @@
 
   // ---------- boot ----------
   function init(){
-    setSettingsEnabled(isUnlocked());
+    // Start with 4 rows
     rows.push(makeDefaultRow("intake"));
     rows.push(makeDefaultRow("intake"));
     rows.push(makeDefaultRow("exhaust"));
     rows.push(makeDefaultRow("exhaust"));
     render();
     recalcAll();
+
+    // Apply initial lock state (shows overlay when locked)
+    setAppEnabled(isUnlocked());
   }
 
   init();
@@ -710,6 +753,3 @@
 </script>
 </body>
 </html>
-
-
-
