@@ -184,6 +184,10 @@
     .modal .muted{margin-bottom:10px}
     .modal input{width:100%}
     .modal .err{color:var(--bad); font-size:12px; margin-top:8px; display:none}
+
+    /* ✅ FIX: ensure password modal is above lock overlay */
+    #appLockBackdrop { z-index: 9000; }
+    #modalBackdrop { z-index: 10000; }
   </style>
 </head>
 
@@ -387,8 +391,7 @@
   }
 
   function setAppEnabled(enabled){
-    // Disable EVERYTHING on the page (inputs/selects/buttons),
-    // except the unlock/lock controls and modal controls.
+    // Disable EVERYTHING, except unlock/lock + modal controls
     document.querySelectorAll("input, select, button").forEach(el => {
       const allowIds = new Set([
         "unlockBtn","lockBtn",
@@ -423,11 +426,19 @@
   function openModal(){
     $("pwErr").style.display = "none";
     $("pwInput").value = "";
+
+    // ✅ FIX: hide lock overlay so it can't block typing
+    $("appLockBackdrop").style.display = "none";
+
     $("modalBackdrop").style.display = "flex";
     setTimeout(()=> $("pwInput").focus(), 50);
   }
+
   function closeModal(){
     $("modalBackdrop").style.display = "none";
+
+    // ✅ FIX: if still locked, bring overlay back
+    $("appLockBackdrop").style.display = isUnlocked() ? "none" : "flex";
   }
 
   function unlockApp(){
@@ -634,7 +645,7 @@
       cards.appendChild(card);
     });
 
-    // bind inputs (table + cards share same class/data-id)
+    // bind inputs
     document.querySelectorAll("select.type").forEach(el => {
       el.addEventListener("change", () => {
         const id = Number(el.dataset.id);
@@ -675,7 +686,7 @@
       btn.addEventListener("click", () => removeRow(Number(btn.dataset.remove)));
     });
 
-    // Apply lock state after re-render (so new controls are disabled if locked)
+    // Re-apply lock state after render (new controls get disabled)
     setAppEnabled(isUnlocked());
 
     // initial output fill
@@ -741,6 +752,7 @@
     rows.push(makeDefaultRow("intake"));
     rows.push(makeDefaultRow("exhaust"));
     rows.push(makeDefaultRow("exhaust"));
+
     render();
     recalcAll();
 
