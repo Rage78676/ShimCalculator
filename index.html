@@ -3,5 +3,253 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Shim / Valve
+  <title>Shim / Valve Clearance Calculator</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;padding:18px;background:#0b0f17;color:#e8f0ff}
+    .wrap{max-width:1100px;margin:0 auto}
+    .card{background:#121a28;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:14px;margin:12px 0}
+    h1{margin:0 0 8px;font-size:20px}
+    label{display:block;font-size:12px;color:#9bb0cf;margin:10px 0 6px}
+    input,select,button{border-radius:10px;border:1px solid rgba(255,255,255,.10);background:rgba(255,255,255,.04);color:#e8f0ff;padding:10px 12px}
+    button{cursor:pointer}
+    .row{display:flex;gap:10px;flex-wrap:wrap}
+    .field{flex:1;min-width:140px}
+    .small{min-width:110px;flex:0 0 110px}
+    table{width:100%;border-collapse:collapse;border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden}
+    th,td{padding:10px;border-bottom:1px solid rgba(255,255,255,.08);font-size:13px;vertical-align:top}
+    th{color:#9bb0cf;text-align:left;background:rgba(255,255,255,.03)}
+    tr:last-child td{border-bottom:none}
+    .muted{color:#9bb0cf;font-size:12px}
+    .pill{display:inline-block;padding:3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.12);font-size:12px}
+    .good{color:#2fe39b;border-color:rgba(47,227,155,.25);background:rgba(47,227,155,.08)}
+    .bad{color:#ff7a73;border-color:rgba(255,122,115,.25);background:rgba(255,122,115,.08)}
+    .warn{color:#ffcc66;border-color:rgba(255,204,102,.25);background:rgba(255,204,102,.08)}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Bike Shim / Valve Clearance Calculator</h1>
+  <div class="muted">Enter your spec, measured clearance, and old shim. You’ll get: target, clearance needed, new shim (rounded), predicted final clearance.</div>
+
+  <div class="card">
+    <div class="row">
+      <div class="field small">
+        <label>Units</label>
+        <select id="unit">
+          <option value="mm" selected>mm</option>
+          <option value="in">inches</option>
+        </select>
+      </div>
+      <div class="field small">
+        <label>Shim step</label>
+        <select id="shimStep">
+          <option value="0.01">0.01 mm</option>
+          <option value="0.025">0.025 mm</option>
+          <option value="0.05" selected>0.05 mm</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Target inside spec</label>
+        <select id="targetMode">
+          <option value="min">Min</option>
+          <option value="mid" selected>Mid</option>
+          <option value="max">Max</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label>Intake spec (min / max)</label>
+        <div class="row">
+          <input id="inMin" type="number" step="0.0001" value="0.10" class="field" />
+          <input id="inMax" type="number" step="0.0001" value="0.15" class="field" />
+        </div>
+      </div>
+      <div class="field">
+        <label>Exhaust spec (min / max)</label>
+        <div class="row">
+          <input id="exMin" type="number" step="0.0001" value="0.20" class="field" />
+          <input id="exMax" type="number" step="0.0001" value="0.25" class="field" />
+        </div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:10px">
+      <button id="addRow">+ Add valve</button>
+      <button id="add4">+ Add 4</button>
+      <button id="recalc">Recalculate</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Type</th>
+          <th>Measured clearance</th>
+          <th>Old shim (mm)</th>
+          <th>Target</th>
+          <th>Clearance needed</th>
+          <th>New shim</th>
+          <th>Predicted final clearance</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+    <div class="muted" style="margin-top:10px">
+      Clearance needed: <span class="mono">target − measured</span> (positive = needs more clearance / tight, negative = needs less / loose).
+      <br/>Shim formula: <span class="mono">newShim = oldShim + (measured − target)</span>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const MM_PER_IN = 25.4;
+  const $ = (id) => document.getElementById(id);
+  const tbody = $("tbody");
+  let n = 0;
+
+  const toMM = (v, unit) => unit === "in" ? v * MM_PER_IN : v;
+  const fromMM = (v, unit) => unit === "in" ? v / MM_PER_IN : v;
+  const fmt = (v, unit) => unit === "in" ? v.toFixed(4) : v.toFixed(3);
+
+  function getSpecsMM(type) {
+    const unit = $("unit").value;
+    const min = parseFloat(type === "intake" ? $("inMin").value : $("exMin").value);
+    const max = parseFloat(type === "intake" ? $("inMax").value : $("exMax").value);
+    if (!isFinite(min) || !isFinite(max)) return null;
+    const minMM = toMM(min, unit), maxMM = toMM(max, unit);
+    if (!(minMM > 0 && maxMM > 0 && maxMM >= minMM)) return null;
+    return { min: minMM, max: maxMM };
+  }
+
+  function getTargetMM(type) {
+    const specs = getSpecsMM(type);
+    if (!specs) return null;
+    const mode = $("targetMode").value;
+    if (mode === "min") return specs.min;
+    if (mode === "max") return specs.max;
+    return (specs.min + specs.max) / 2;
+  }
+
+  function roundShimMM(v) {
+    const step = parseFloat($("shimStep").value); // step always in mm
+    return Math.round(v / step) * step;
+  }
+
+  function addRow(defaultType="intake") {
+    n++;
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td class="mono">${n}</td>
+      <td>
+        <select class="type">
+          <option value="intake" ${defaultType==="intake"?"selected":""}>Intake</option>
+          <option value="exhaust" ${defaultType==="exhaust"?"selected":""}>Exhaust</option>
+        </select>
+      </td>
+      <td>
+        <input class="measured" type="number" step="0.0001" placeholder="e.g. 0.12" style="width:140px">
+        <div class="muted statusLine"></div>
+      </td>
+      <td><input class="oldShim" type="number" step="0.01" placeholder="e.g. 2.35" style="width:140px"></td>
+      <td class="target mono">—</td>
+      <td class="needed mono">—</td>
+      <td class="newShim mono">—</td>
+      <td class="final mono">—</td>
+      <td><button class="remove">✕</button></td>
+    `;
+    tr.querySelectorAll("input,select").forEach(el => {
+      el.addEventListener("input", () => recalcRow(tr));
+      el.addEventListener("change", () => recalcRow(tr));
+    });
+    tr.querySelector(".remove").addEventListener("click", () => { tr.remove(); recalcAll(); });
+    tbody.appendChild(tr);
+    recalcRow(tr);
+  }
+
+  function recalcRow(tr) {
+    const unit = $("unit").value;
+    const type = tr.querySelector(".type").value;
+    const measured = parseFloat(tr.querySelector(".measured").value);
+    const oldShim = parseFloat(tr.querySelector(".oldShim").value);
+
+    const specs = getSpecsMM(type);
+    const targetMM = getTargetMM(type);
+
+    const targetCell = tr.querySelector(".target");
+    const neededCell = tr.querySelector(".needed");
+    const newShimCell = tr.querySelector(".newShim");
+    const finalCell = tr.querySelector(".final");
+    const statusLine = tr.querySelector(".statusLine");
+
+    if (!specs || !isFinite(targetMM)) {
+      targetCell.textContent = "Fix specs";
+      neededCell.textContent = newShimCell.textContent = finalCell.textContent = "—";
+      statusLine.innerHTML = `<span class="pill warn">Enter valid spec min/max</span>`;
+      return;
+    }
+
+    targetCell.textContent = fmt(fromMM(targetMM, unit), unit);
+
+    if (!isFinite(measured)) {
+      neededCell.textContent = newShimCell.textContent = finalCell.textContent = "—";
+      statusLine.innerHTML = `<span class="pill warn">Enter measured clearance</span>`;
+      return;
+    }
+
+    const measuredMM = toMM(measured, unit);
+
+    // Spec status
+    let st = {cls:"good", txt:"In spec"};
+    if (measuredMM < specs.min) st = {cls:"bad", txt:"Too tight"};
+    if (measuredMM > specs.max) st = {cls:"bad", txt:"Too loose"};
+    statusLine.innerHTML = `<span class="pill ${st.cls}">${st.txt}</span>
+      <span class="muted"> spec ${fmt(fromMM(specs.min,unit),unit)}–${fmt(fromMM(specs.max,unit),unit)} ${unit}</span>`;
+
+    if (!isFinite(oldShim) || oldShim <= 0) {
+      neededCell.textContent = newShimCell.textContent = finalCell.textContent = "—";
+      return;
+    }
+
+    // Clearance needed: target - measured
+    const neededMM = targetMM - measuredMM;
+    neededCell.textContent = `${neededMM>=0?"+":""}${fmt(fromMM(neededMM,unit),unit)} ${unit}`;
+
+    // New shim: old + (measured - target)
+    const rawNewShim = oldShim + (measuredMM - targetMM);
+    const newShim = roundShimMM(rawNewShim);
+    const shimNumber = Math.round(newShim * 100); // 2.35 -> 235
+    newShimCell.innerHTML = `${newShim.toFixed(2)} mm <span class="muted">(≈ ${shimNumber})</span>`;
+
+    // Predicted final clearance: measured + (old - new)
+    const finalMM = measuredMM + (oldShim - newShim);
+    finalCell.textContent = `${fmt(fromMM(finalMM,unit),unit)} ${unit}`;
+  }
+
+  function recalcAll() {
+    [...tbody.querySelectorAll("tr")].forEach(recalcRow);
+  }
+
+  ["unit","shimStep","targetMode","inMin","inMax","exMin","exMax"].forEach(id => {
+    $(id).addEventListener("input", recalcAll);
+    $(id).addEventListener("change", recalcAll);
+  });
+
+  $("addRow").addEventListener("click", () => addRow("intake"));
+  $("add4").addEventListener("click", () => { for (let i=0;i<4;i++) addRow(i<2?"intake":"exhaust"); });
+  $("recalc").addEventListener("click", recalcAll);
+
+  // Start with 4 rows
+  for (let i=0;i<4;i++) addRow(i<2?"intake":"exhaust");
+})();
+</script>
+</body>
+</html>
+
 
